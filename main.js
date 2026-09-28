@@ -23,19 +23,25 @@ const characters = {
 };
 
 function randomIndex(max) {
-  // O crypto deixa a escolha mais aleatória que Math.random().
-  const array = new Uint32Array(1);
-  window.crypto.getRandomValues(array);
-  return array[0] % max;
+  if (window.crypto && window.crypto.getRandomValues) {
+    const array = new Uint32Array(1);
+    window.crypto.getRandomValues(array);
+    return array[0] % max;
+  }
+  return Math.floor(Math.random() * max);
 }
 
 function shuffle(text) {
   const letters = [...text];
-  for (let i = letters.length - 1; i > 0; i--) {
-    const randomPosition = randomIndex(i + 1);
-    [letters[i], letters[randomPosition]] = [letters[randomPosition], letters[i]];
+  for (let index = letters.length - 1; index > 0; index -= 1) {
+    const randomPosition = randomIndex(index + 1);
+    [letters[index], letters[randomPosition]] = [letters[randomPosition], letters[index]];
   }
   return letters.join('');
+}
+
+function selectedGroups() {
+  return Object.keys(options).filter((group) => options[group].checked);
 }
 
 function updateRange() {
@@ -45,79 +51,80 @@ function updateRange() {
   const percent = ((value - min) / (max - min)) * 100;
 
   lengthValue.textContent = value;
-  lengthInput.style.background = `linear-gradient(to right, #a9ff00 ${percent}%, #3a3f4b ${percent}%)`;
-}
-
-function selectedGroups() {
-  return Object.keys(options).filter((group) => options[group].checked);
-}
-
-function calculateStrength(length, groups) {
-  const points = length + groups.length * 3;
-
-  if (points <= 13) return { level: 1, text: 'FRACA' };
-  if (points <= 19) return { level: 2, text: 'MÉDIA' };
-  if (points <= 26) return { level: 3, text: 'FORTE' };
-  return { level: 4, text: 'MUITO FORTE' };
+  lengthInput.style.background = `linear-gradient(to right, #35ff61 ${percent}%, #19351f ${percent}%)`;
 }
 
 function updateStrength() {
+  const length = Number(lengthInput.value);
   const groups = selectedGroups();
-  const strength = calculateStrength(Number(lengthInput.value), groups);
+  const points = length + groups.length * 3;
+  let level = 1;
+  let text = 'FRACA';
 
-  strengthMeter.className = `strength-meter level-${strength.level}`;
-  strengthLabel.textContent = strength.text;
+  if (groups.length === 0) {
+    strengthMeter.className = 'strength-meter';
+    strengthLabel.textContent = 'SEM DADOS';
+    return;
+  }
+  if (points > 13) { level = 2; text = 'MÉDIA'; }
+  if (points > 19) { level = 3; text = 'FORTE'; }
+  if (points > 26) { level = 4; text = 'MUITO FORTE'; }
+
+  strengthMeter.className = `strength-meter level-${level}`;
+  strengthLabel.textContent = text;
 }
 
 function generatePassword() {
   const groups = selectedGroups();
   const length = Number(lengthInput.value);
 
+  updateRange();
+  updateStrength();
+
   if (groups.length === 0) {
     warning.textContent = 'Escolha pelo menos um tipo de caractere.';
-    passwordOutput.textContent = 'erro: sem_caracteres';
-    strengthMeter.className = 'strength-meter';
-    strengthLabel.textContent = 'SEM DADOS';
+    passwordOutput.textContent = 'sem_caracteres';
     return;
   }
 
   warning.textContent = '';
-  let newPassword = '';
-  let possibleCharacters = '';
+  let password = '';
+  let pool = '';
 
   groups.forEach((group) => {
-    possibleCharacters += characters[group];
-    // Garante que cada opção marcada apareça pelo menos uma vez.
-    newPassword += characters[group][randomIndex(characters[group].length)];
+    pool += characters[group];
+    password += characters[group][randomIndex(characters[group].length)];
   });
 
-  while (newPassword.length < length) {
-    newPassword += possibleCharacters[randomIndex(possibleCharacters.length)];
+  while (password.length < length) {
+    password += pool[randomIndex(pool.length)];
   }
 
-  passwordOutput.textContent = shuffle(newPassword);
-  updateStrength();
+  passwordOutput.textContent = shuffle(password);
 }
 
 async function copyPassword() {
   const password = passwordOutput.textContent;
-
-  if (password.startsWith('erro:')) return;
+  if (!password || password === 'sem_caracteres') return;
 
   try {
-    await navigator.clipboard.writeText(password);
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(password);
+    } else {
+      const input = document.createElement('textarea');
+      input.value = password;
+      input.style.position = 'fixed';
+      input.style.opacity = '0';
+      document.body.appendChild(input);
+      input.focus();
+      input.select();
+      document.execCommand('copy');
+      input.remove();
+    }
     copyText.textContent = 'COPIADO';
     copyButton.classList.add('copied');
-  } catch {
-    // Alternativa para navegadores que não liberam a Clipboard API.
-    const temporaryInput = document.createElement('textarea');
-    temporaryInput.value = password;
-    document.body.appendChild(temporaryInput);
-    temporaryInput.select();
-    document.execCommand('copy');
-    temporaryInput.remove();
-    copyText.textContent = 'COPIADO';
-    copyButton.classList.add('copied');
+  } catch (error) {
+    copyText.textContent = 'SELECIONE';
   }
 
   window.setTimeout(() => {
@@ -126,14 +133,9 @@ async function copyPassword() {
   }, 1600);
 }
 
-lengthInput.addEventListener('input', () => {
-  updateRange();
-  updateStrength();
-});
-
+lengthInput.addEventListener('input', generatePassword);
 generateButton.addEventListener('click', generatePassword);
 copyButton.addEventListener('click', copyPassword);
 Object.values(options).forEach((option) => option.addEventListener('change', generatePassword));
 
-updateRange();
 generatePassword();
